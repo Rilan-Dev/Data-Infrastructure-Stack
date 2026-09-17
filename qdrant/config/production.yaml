@@ -39,11 +39,12 @@ service:
   # Enable API key authentication (required for multi-project)
   api_key: ${QDRANT_API_KEY}
   
-  # CORS — restrict to your domains
+  # CORS — restrict to your domain(s). Replace the placeholder below with
+  # your real domain(s) before going to production; do not leave a wildcard
+  # domain from someone else's deployment in place.
   cors:
     allow_origin:
-      - "https://neo4j.ostechnologies.in"
-      - "https://*.ostechnologies.in"
+      - "https://your-domain.example.com"
       - "http://localhost:*"
     allow_methods:
       - GET

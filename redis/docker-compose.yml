@@ -31,10 +31,12 @@ services:
     cap_drop:
       - ALL
 
-    # Volumes
+    # Volumes (data/snapshots paths are relative to this directory by default;
+    # override REDIS_DATA_HOST/REDIS_SNAPSHOTS_HOST in .env to point at a
+    # dedicated disk in production)
     volumes:
-      - ${REDIS_DATA_HOST:-/docker/redis/data}:/data
-      - ${REDIS_SNAPSHOTS_HOST:-/docker/redis/snapshots}:/snapshots
+      - ${REDIS_DATA_HOST:-./data}:/data
+      - ${REDIS_SNAPSHOTS_HOST:-./snapshots}:/snapshots
       - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
       - ./config/entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
 
@@ -109,7 +111,7 @@ services:
         done
       '
     volumes:
-      - ${REDIS_SNAPSHOTS_HOST:-/docker/redis/snapshots}:/snapshots
+      - ${REDIS_SNAPSHOTS_HOST:-./snapshots}:/snapshots
     depends_on:
       redis:
         condition: service_healthy

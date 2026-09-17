@@ -3,16 +3,16 @@
 ## Quick Start
 
 ```bash
-cd /docker/redis
+cd redis   # from the repo root
 
 # 1. Review .env (passwords are pre-generated)
 cat .env
 
 # 2. Deploy
-docker compose -f docker-compose.redis.yml --env-file .env up -d
+docker compose --env-file .env up -d
 
 # 3. Verify
-docker compose -f docker-compose.redis.yml ps
+docker compose ps
 docker exec redis redis-cli -a $REDIS_ADMIN_PASSWORD ping
 ```
 
@@ -56,7 +56,7 @@ project-b:queue:jobs
 
 ### Restore
 ```bash
-./scripts/restore.sh /docker/redis/snapshots/dump-20260818-030000.rdb
+./scripts/restore.sh ./snapshots/dump-20260818-030000.rdb
 ```
 
 ### Manual Snapshot
@@ -108,18 +108,18 @@ Key settings in `config/redis.conf`:
 
 - **Automatic**: Daily 03:00 UTC via `redis-backup` sidecar (profile: backup)
 - **Retention**: 7 daily snapshots
-- **Location**: `/docker/redis/snapshots/`
+- **Location**: `./snapshots/`
 - **Remote**: Configure S3/R2 in backup script
 
 ```bash
 # Deploy with backup
-docker compose -f docker-compose.redis.yml --profile backup up -d
+docker compose --profile backup up -d
 ```
 
 ## Restore Test (Monthly)
 
 ```bash
-./scripts/restore.sh /docker/redis/snapshots/dump-20260818-030000.rdb
+./scripts/restore.sh ./snapshots/dump-20260818-030000.rdb
 ```
 
 ## Migration to SSD (When Available)
@@ -130,10 +130,10 @@ docker compose -f docker-compose.redis.yml --profile backup up -d
 #    REDIS_DATA_HOST=/srv/platform/redis/data
 #    REDIS_SNAPSHOTS_HOST=/srv/platform/redis/snapshots
 # 3. Migrate:
-docker compose -f docker-compose.redis.yml stop redis
-rsync -a /docker/redis/data/ /srv/platform/redis/data/
-rsync -a /docker/redis/snapshots/ /srv/platform/redis/snapshots/
-docker compose -f docker-compose.redis.yml up -d
+docker compose stop redis
+rsync -a ./data/ /srv/platform/redis/data/
+rsync -a ./snapshots/ /srv/platform/redis/snapshots/
+docker compose up -d
 
 # 4. Enable AOF for durability (edit redis.conf):
 #    appendonly yes

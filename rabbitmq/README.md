@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-cd /docker/rabbitmq
+cd rabbitmq   # from the repo root
 
 # 1. Review and update .env (keys are auto-generated but verify)
 cat .env
@@ -55,7 +55,7 @@ Backups are performed via `rabbitmqadmin` and stored in `rabbitmq/backup/`.
 ./scripts/backup.sh
 
 # Backup schedule (cron)
-0 3 * * * /docker/rabbitmq/scripts/backup.sh
+0 3 * * * cd /path/to/Data-Infrastructure-Stack/rabbitmq && ./scripts/backup.sh >> backup/cron.log 2>&1
 ```
 
 ## Restore
