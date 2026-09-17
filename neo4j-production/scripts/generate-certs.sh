@@ -8,7 +8,7 @@ mkdir -p certificates/ca certificates/bolt certificates/https
 SAN_EXTFILE="$(mktemp)"
 trap 'rm -f "$SAN_EXTFILE"' EXIT
 cat > "$SAN_EXTFILE" <<'EOF'
-subjectAltName=DNS:neo4j.example.com,DNS:localhost,IP:127.0.0.1
+subjectAltName=DNS:localhost,IP:127.0.0.1
 EOF
 
 # --- Private CA ---

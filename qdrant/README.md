@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-cd /docker/qdrant
+cd qdrant   # from the repo root
 
 # 1. Review and update .env (keys are auto-generated but verify)
 cat .env
@@ -27,7 +27,7 @@ Qdrant runs on **internal network `platform-qdrant`**. No ports exposed to host.
 docker network connect platform-qdrant <proxy-container>
 
 # Proxy config example (Caddy):
-# qdrant.ostechnologies.in {
+# qdrant.your-domain.example.com {
 #     reverse_proxy qdrant:6333
 # }
 ```
@@ -111,7 +111,7 @@ curl -s http://localhost:6333/snapshots -H "api-key: $QDRANT_API_KEY" | jq
 docker compose stop qdrant
 
 # 2. Restore (replace storage contents)
-# tar -xzf /docker/qdrant/snapshots/<snapshot>.tar.gz -C /docker/qdrant/storage
+# tar -xzf ./snapshots/<snapshot>.tar.gz -C ./storage
 
 # 3. Start Qdrant
 docker compose start qdrant
@@ -199,8 +199,8 @@ curl -s http://localhost:6333/readyz
 
 | Path | Purpose |
 |------|---------|
-| `/docker/qdrant/storage` | Live vector data |
-| `/docker/qdrant/snapshots` | Local snapshots |
-| `/docker/qdrant/tmp` | Temporary files |
-| `/docker/qdrant/config/production.yaml` | Qdrant config |
-| `/docker/qdrant/.env` | Secrets & config |
+| `./storage` | Live vector data |
+| `./snapshots` | Local snapshots |
+| `./tmp` | Temporary files |
+| `./config/production.yaml` | Qdrant config |
+| `./.env` | Secrets & config |
