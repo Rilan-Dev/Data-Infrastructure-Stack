@@ -13,7 +13,7 @@ services:
     # Expose only to localhost for Cloudflare Tunnel (host network)
     ports:
       - "0.0.0.0:6333:6333"
-      - "127.0.0.1:6334:6334"
+      - "0.0.0.0:6334:6334"
 
     # Internal network for apps
     networks:

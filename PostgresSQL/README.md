@@ -69,6 +69,20 @@ CREATE INDEX ON items USING hnsw (embedding vector_cosine_ops);
 SELECT id FROM items ORDER BY embedding <-> '[0.1, 0.2, ...]' LIMIT 5;
 ```
 
+### Important: pgvector is automatically enabled for new databases
+
+When you create a new database in this PostgreSQL instance, the `vector` extension will be automatically enabled. This means you can immediately start using vector similarity search in any new database without needing to manually run `CREATE EXTENSION vector`.
+
+### For existing databases
+
+If you have existing databases that need vector support, you can enable it by running:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+This ensures that pgvector is available for all databases in this PostgreSQL instance, making it fully accessible for normal database applications.
+
 ## Backup
 
 Backups are performed via `pg_dump` and stored in `postgres/backups/`.
