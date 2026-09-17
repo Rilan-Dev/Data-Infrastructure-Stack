@@ -35,6 +35,7 @@ Data-Infrastructure-Stack/
 │
 ├── neo4j-production/       # Neo4j Enterprise — graph DB
 │   ├── docker-compose.yml
+│   ├── README.md            # full runbook
 │   ├── DoD-report.md       # deployment verification report
 │   ├── .env.example
 │   ├── config/              # neo4j.conf, logging configs
@@ -140,7 +141,10 @@ This should return nothing — if it does, something sensitive may be staged.
 ## Documentation Index
 
 - [`AGENTS.md`](./AGENTS.md) — stack architecture, conventions, and guidance for AI coding agents / new contributors
+- [`PostgresSQL/README.md`](./PostgresSQL/README.md) — PostgreSQL runbook (quick start, credentials, extensions/pgvector, backup/restore, troubleshooting)
+- [`neo4j-production/README.md`](./neo4j-production/README.md) — Neo4j runbook (quick start, TLS certificates, auth/secrets, licensing, memory tuning, backup/restore, monitoring, troubleshooting)
 - [`qdrant/README.md`](./qdrant/README.md) — Qdrant runbook (quick start, API keys, collections, quantization, monitoring, upgrade, troubleshooting)
+- [`rabbitmq/README.md`](./rabbitmq/README.md) — RabbitMQ runbook (quick start, management UI, definitions, backup/restore, troubleshooting)
 - [`redis/README.md`](./redis/README.md) — Redis runbook (quick start, ACL credentials, key naming, backup/restore, SSD migration notes)
 - [`neo4j-production/DoD-report.md`](./neo4j-production/DoD-report.md) — Neo4j deployment verification report (checklist, credentials, known warnings, operational notes)
 
