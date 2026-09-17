@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-cd /docker/PostgresSQL
+cd PostgresSQL   # from the repo root
 
 # 1. Review and update .env (keys are auto-generated but verify)
 cat .env
@@ -92,7 +92,7 @@ Backups are performed via `pg_dump` and stored in `postgres/backups/`.
 ./scripts/backup.sh
 
 # Backup schedule (cron)
-0 3 * * * /docker/PostgresSQL/scripts/backup.sh
+0 3 * * * cd /path/to/Data-Infrastructure-Stack/PostgresSQL && ./scripts/backup.sh >> postgres/backups/cron.log 2>&1
 ```
 
 ## Restore

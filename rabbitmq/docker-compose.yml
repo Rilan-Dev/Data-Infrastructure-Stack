@@ -32,10 +32,12 @@ services:
     security_opt:
       - no-new-privileges:true
 
-    # Volumes
+    # Volumes (backup path is relative to this directory by default; override
+    # RABBITMQ_BACKUP_HOST in .env to point at a dedicated disk in production)
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-      - ${RABBITMQ_BACKUP_HOST:-/docker/rabbitmq/backup}:/backup
+      - ${RABBITMQ_BACKUP_HOST:-./backup}:/backup
+      - ./config/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
 
     # Environment
     environment:

@@ -42,10 +42,13 @@ services:
     cap_drop:
       - ALL
 
-    # Volumes — persistent storage
+    # Volumes — persistent storage (relative to this compose file's directory
+    # by default, so the repo works out-of-the-box no matter where it's
+    # cloned; override QDRANT_STORAGE_HOST/QDRANT_SNAPSHOTS_HOST in .env to
+    # point at a dedicated disk in production)
     volumes:
-      - ${QDRANT_STORAGE_HOST:-/docker/qdrant/storage}:/qdrant/storage
-      - ${QDRANT_SNAPSHOTS_HOST:-/docker/qdrant/snapshots}:/qdrant/snapshots
+      - ${QDRANT_STORAGE_HOST:-./storage}:/qdrant/storage
+      - ${QDRANT_SNAPSHOTS_HOST:-./snapshots}:/qdrant/snapshots
       - ./config/production.yaml:/qdrant/config/production.yaml:ro
 
     # Environment — non-sensitive config only
@@ -126,7 +129,7 @@ services:
         done
       '
     volumes:
-      - ${QDRANT_SNAPSHOTS_HOST:-/docker/qdrant/snapshots}:/qdrant/snapshots:ro
+      - ${QDRANT_SNAPSHOTS_HOST:-./snapshots}:/qdrant/snapshots:ro
     depends_on:
       qdrant:
         condition: service_healthy
@@ -138,17 +141,3 @@ networks:
     name: ${QDRANT_NETWORK_NAME:-platform-qdrant}
     internal: true
     driver: bridge
-
-volumes:
-  qdrant_storage:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${QDRANT_STORAGE_HOST:-/docker/qdrant/storage}
-  qdrant_snapshots:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${QDRANT_SNAPSHOTS_HOST:-/docker/qdrant/snapshots}

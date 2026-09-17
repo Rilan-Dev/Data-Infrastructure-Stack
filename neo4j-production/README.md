@@ -7,11 +7,13 @@ Graph database service running **Neo4j Enterprise** (`neo4j:2026.06.0-enterprise
 ## Quick Start
 
 ```bash
-cd /docker/Data-Infrastructure-Stack/neo4j-production
+cd neo4j-production   # from the repo root
 
 # 1. Copy the example environment file and adjust for the host
 cp .env.example .env
-nano .env   # set NEO4J_ACCEPT_LICENSE_AGREEMENT, memory sizing, binds
+nano .env   # set NEO4J_ACCEPT_LICENSE_AGREEMENT, memory sizing, binds,
+            # and NEO4J_UID/NEO4J_GID (run `id -u` / `id -g` and paste the
+            # results — see Troubleshooting if you skip this)
 
 # 2. Run the init script — creates secret, generates self-signed certs,
 #    pulls the pinned image, and starts the container
@@ -52,15 +54,20 @@ wget -qO- http://127.0.0.1:2004/metrics | head   # Prometheus metrics (healthche
 
 ### Cloudflare Tunnel / external routing
 
-`config/neo4j.conf` advertises a public hostname for cluster/routing purposes even though this is a single-instance deployment:
+The advertised Bolt/routing address is **not** hardcoded in `config/neo4j.conf` — it's injected at container start from `.env` via `NEO4J_BOLT_ADVERTISED_ADDRESS` (see `docker-compose.yml`), so this repo works out-of-the-box with the default `localhost:7687`:
 
-```conf
-server.bolt.advertised_address=bolt-neo4j.ostechnologies.in:443
-server.cluster.advertised_address=bolt-neo4j.ostechnologies.in:443
-server.routing.advertised_address=bolt-neo4j.ostechnologies.in:443
+```env
+# .env
+NEO4J_BOLT_ADVERTISED_ADDRESS=localhost:7687
 ```
 
-This tells Bolt drivers connecting through the tunnel to route back through `bolt-neo4j.ostechnologies.in:443` instead of the container's internal address. If you deploy this stack under a different domain, update these three lines (and regenerate certificates with matching SANs — see below) before going live.
+If you route Bolt traffic through a Cloudflare Tunnel / reverse proxy under your own domain, set this to your public hostname instead, e.g.:
+
+```env
+NEO4J_BOLT_ADVERTISED_ADDRESS=bolt-neo4j.your-domain.example.com:443
+```
+
+This tells Bolt drivers connecting through the tunnel to route back through that public hostname instead of the container's internal address. Also regenerate certificates with matching SANs (see below) before going live under a real domain.
 
 ---
 
@@ -218,7 +225,7 @@ This:
 
 ```bash
 # Example: nightly at 02:00
-0 2 * * * cd /docker/Data-Infrastructure-Stack/neo4j-production && ./scripts/backup.sh >> backups/cron.log 2>&1
+0 2 * * * cd /path/to/Data-Infrastructure-Stack/neo4j-production && ./scripts/backup.sh >> backups/cron.log 2>&1
 ```
 
 ### Restore
@@ -304,6 +311,7 @@ Some plugins require additional `dbms.security.procedures.unrestricted` / `unres
 | Driver/browser rejects the self-signed cert | Either trust the private CA (`certificates/ca/ca.crt`) in your client, or replace the certs with ones from a trusted CA (see TLS Certificates above). |
 | Container restart loop | `docker compose logs neo4j` — check for TLS cert path errors (cert/key mismatch, wrong permissions), or an invalid `neo4j.conf` edit. |
 | `neo4j-admin` commands fail with permission errors | Database files are owned by the in-container `neo4j` user (uid 7474) — run admin commands with `docker exec -u neo4j neo4j ...`, not as root. |
+| Host user locked out of `data/`, `logs/`, `import/`, or `config/` after first start (`Permission denied` on `ls`/`cat`/`git`) | Neo4j's entrypoint runs as root by default and recursively `chown`s every bind-mounted directory to its internal `neo4j` user (uid 7474), which locks the host user out. Fixed by setting `NEO4J_UID`/`NEO4J_GID` in `.env` to your host user (`id -u` / `id -g`) and the compose file's `user:` directive, which makes the entrypoint skip the chown and run as you instead. If a directory is already locked from before this fix, recover it with: `docker run --rm -v $(pwd)/<dir>:/fixme alpine chown -R $(id -u):$(id -g) /fixme` (uses your `docker` group membership, no `sudo` needed). |
 | Backup fails with permission denied on `backups/<STAMP>/` | The backup dir needs to be writable by both the in-container `neo4j` user and the host user running the verbose log redirect — `scripts/backup.sh` already `chmod 777`s the timestamped dir; don't remove that line unless you've solved the dual-owner bind mount differently. |
 | `SECURITY WARNING: allow_proxies` / `allow_hosts` in logs | Expected — `dbms.security.allow_proxies=true` and `dbms.security.allow_hosts=true` are set to support the Cloudflare Tunnel reverse-proxy setup. Ensure only the trusted tunnel/proxy can reach the container's published ports; do not expose these ports directly to untrusted networks. |
 | Metrics endpoint returns nothing | Confirm `server.metrics.enabled=true` and `server.metrics.prometheus.enabled=true` are still set in `config/neo4j.conf`, and that `NEO4J_METRICS_BIND` matches how you're probing it (container-internal `127.0.0.1:2004` always works via `docker exec`, host access depends on the bind). |
