@@ -19,7 +19,7 @@ flowchart TD
 
 | Service | Purpose | Isolation | Access Pattern |
 |---|---|---|---|
-| **PostgreSQL** | Relational database | Dedicated container | `0.0.0.0:65432` → `5432` (host) |
+| **PostgreSQL** | Relational database + vector search (pgvector) | Dedicated container | `0.0.0.0:65432` → `5432` (host) |
 | **Neo4j** | Graph database | Dedicated container | `7473` (HTTPS), `7687` (Bolt), `2004` (metrics), `7474` (HTTP, tunnel ingress) |
 | **Qdrant** | Vector database | Internal network `platform-qdrant` | `127.0.0.1:6334` (gRPC) |
 | **RabbitMQ** | Message broker | Dedicated container | `0.0.0.0:5672,15672,5671,4369,25672` (host) |

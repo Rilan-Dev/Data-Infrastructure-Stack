@@ -10,7 +10,7 @@ Self-hosted, Docker Compose–based data infrastructure for a single production 
 
 | Service | Image | Purpose | Exposure | Docs |
 |---|---|---|---|---|
-| **PostgreSQL** | `postgres:16` | Primary relational database | `0.0.0.0:65432` → `5432` | [`PostgresSQL/`](./PostgresSQL) |
+| **PostgreSQL** | `pgvector/pgvector:pg16` | Primary relational database + vector similarity search (pgvector) | `0.0.0.0:65432` → `5432` | [`PostgresSQL/`](./PostgresSQL) |
 | **Neo4j** | `neo4j:2026.06.0-enterprise` | Graph database (HTTPS + Bolt only) | `7473` (HTTPS), `7687` (Bolt), `2004` (metrics), `7474` (HTTP, tunnel ingress) | [`neo4j-production/`](./neo4j-production) |
 | **Qdrant** | `qdrant/qdrant:v1.12.2-unprivileged` | Vector database (multi-project, API-key scoped) | Internal network `platform-qdrant` + `127.0.0.1:6334` | [`qdrant/README.md`](./qdrant/README.md) |
 | **RabbitMQ** | `rabbitmq:3.13-management-alpine` | Message broker + management UI | `0.0.0.0:5672,15672,5671,4369,25672` | [`rabbitmq/`](./rabbitmq) |
@@ -24,17 +24,19 @@ Each service directory is **self-contained**: its own `docker-compose.yml`, `.en
 
 ```
 Data-Infrastructure-Stack/
-├── PostgresSQL/            # PostgreSQL 16 — relational DB
+├── PostgresSQL/            # PostgreSQL 16 (pgvector/pgvector:pg16) — relational DB + vector search
 │   ├── docker-compose.yml
+│   ├── .env.example
 │   └── postgres/
 │       ├── config/         # postgresql.conf
-│       ├── init/           # init SQL scripts (extensions, etc.)
+│       ├── init/           # init SQL scripts (uuid-ossp, pgcrypto, pg_trgm, hstore, citext, vector)
 │       ├── backups/        # pg_dump output (gitignored)
 │       └── logs/           # gitignored
 │
 ├── neo4j-production/       # Neo4j Enterprise — graph DB
 │   ├── docker-compose.yml
 │   ├── DoD-report.md       # deployment verification report
+│   ├── .env.example
 │   ├── config/              # neo4j.conf, logging configs
 │   ├── scripts/             # backup.sh, restore.sh, init.sh, healthcheck.sh, generate-certs.sh
 │   ├── secrets/             # neo4j_auth (gitignored)
@@ -51,6 +53,8 @@ Data-Infrastructure-Stack/
 │
 ├── rabbitmq/                # RabbitMQ — message broker
 │   ├── docker-compose.yml
+│   ├── README.md
+│   ├── .env.example
 │   ├── config/rabbitmq.conf
 │   ├── definitions/          # exchanges/queues/users export
 │   ├── scripts/

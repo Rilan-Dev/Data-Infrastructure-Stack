@@ -32,7 +32,9 @@ psql -h localhost -p 65432 -U ${POSTGRES_USER} -d ${POSTGRES_DB}
 
 ## Extensions
 
-The following extensions are automatically installed at startup:
+The image used is [`pgvector/pgvector:pg16`](https://github.com/pgvector/pgvector) — official `postgres:16` with the `pgvector` extension precompiled — instead of vanilla `postgres:16`. This allows vector similarity search (embeddings) directly in PostgreSQL alongside relational data.
+
+The following extensions are automatically installed at startup (see `postgres/init/01-create-extensions.sql`):
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -40,6 +42,31 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE EXTENSION IF NOT EXISTS "hstore";
 CREATE EXTENSION IF NOT EXISTS "citext";
+CREATE EXTENSION IF NOT EXISTS "vector";
+```
+
+| Extension | Purpose |
+|---|---|
+| `uuid-ossp` | UUID generation functions |
+| `pgcrypto` | Cryptographic functions (hashing, encryption) |
+| `pg_trgm` | Trigram-based fuzzy text search/similarity |
+| `hstore` | Key-value pair storage within a column |
+| `citext` | Case-insensitive text type |
+| `vector` (pgvector) | Vector similarity search — `vector` column type, `<->`/`<=>`/`<#>` distance operators, HNSW/IVFFlat indexes for embeddings |
+
+### Example: using pgvector
+
+```sql
+CREATE TABLE items (
+    id bigserial PRIMARY KEY,
+    embedding vector(1536)
+);
+
+-- HNSW index for approximate nearest-neighbor search
+CREATE INDEX ON items USING hnsw (embedding vector_cosine_ops);
+
+-- Nearest neighbor query
+SELECT id FROM items ORDER BY embedding <-> '[0.1, 0.2, ...]' LIMIT 5;
 ```
 
 ## Backup
