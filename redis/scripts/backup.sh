@@ -14,7 +14,7 @@ if [[ -f .env ]]; then
 fi
 
 STAMP=$(date +%Y%m%d-%H%M%S)
-DEST="${REDIS_SNAPSHOTS_HOST:-/docker/redis/snapshots}"
+DEST="${REDIS_SNAPSHOTS_HOST:-./snapshots}"
 RETENTION="${REDIS_SNAPSHOT_RETENTION:-7}"
 
 mkdir -p "$DEST"

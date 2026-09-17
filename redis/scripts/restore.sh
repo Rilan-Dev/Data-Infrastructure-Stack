@@ -13,12 +13,12 @@ if [[ -f .env ]]; then
 fi
 
 SNAPSHOT_FILE="${1:-}"
-DEST="${REDIS_DATA_HOST:-/docker/redis/data}"
+DEST="${REDIS_DATA_HOST:-./data}"
 
 if [[ -z "$SNAPSHOT_FILE" ]]; then
     echo "Usage: $0 <snapshot-file>"
     echo "Available snapshots:"
-    ls -la "${REDIS_SNAPSHOTS_HOST:-/docker/redis/snapshots}"/dump-*.rdb 2>/dev/null | awk '{print $9}'
+    ls -la "${REDIS_SNAPSHOTS_HOST:-./snapshots}"/dump-*.rdb 2>/dev/null | awk '{print $9}'
     exit 1
 fi
 
@@ -28,13 +28,13 @@ if [[ ! -f "$SNAPSHOT_FILE" ]]; then
 fi
 
 echo "Stopping Redis..."
-docker compose -f docker-compose.redis.yml stop redis
+docker compose stop redis
 
 echo "Restoring snapshot: $SNAPSHOT_FILE"
 cp "$SNAPSHOT_FILE" "${DEST}/dump.rdb"
 
 echo "Starting Redis..."
-docker compose -f docker-compose.redis.yml start redis
+docker compose start redis
 
 echo "Waiting for Redis to be healthy..."
 for i in {1..30}; do
