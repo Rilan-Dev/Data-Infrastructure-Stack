@@ -1,0 +1,16 @@
+# Secrets
+secrets/
+# Certificates (self-signed CA + keys)
+certificates/
+# Data & logs
+data/
+logs/
+import/*
+!import/.gitkeep
+# Plugins
+plugins/*
+!plugins/.gitkeep
+# Backups
+backups/
+# Local env (contains passwords/paths)
+.env

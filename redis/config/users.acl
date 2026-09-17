@@ -1,0 +1,22 @@
+user admin on #bc7d1b1311f59f7425f66283979d22122711ecb380c999fc7c7d1f67a612dff1 ~* +@all -@dangerous +sync +psync +replconf +info +client +memory +slowlog +latency
+user default off
+
+# Per-project users (key prefixes enforced via ACL)
+# Passwords are set in .env and referenced here via external ACL or created at runtime
+# Format: user <username> on #<password_hash> ~<pattern> +@<categories>
+# Generated passwords will be added via entrypoint or docker-compose env
+
+# Project A - NexusHub / Dynamic-UI-Render
+user project_a on #<PROJECT_A_HASH> ~project-a:* +@read +@write +@list +@set +@sortedset +@hash +@stream +@pubsub +@keyspace +@generic +@string
+user project_a on #<PROJECT_A_HASH> ~project-a:* -@dangerous -@admin -@connection
+
+# Project B - Reserved
+user project_b on #<PROJECT_B_HASH> ~project-b:* +@read +@write +@list +@set +@sortedset +@hash +@stream +@pubsub +@keyspace +@generic +@string
+user project_b on #<PROJECT_B_HASH> ~project-b:* -@dangerous -@admin -@connection
+
+# Project C - Reserved
+user project_c on #<PROJECT_C_HASH> ~project-c:* +@read +@write +@list +@set +@sortedset +@hash +@stream +@pubsub +@keyspace +@generic +@string
+user project_c on #<PROJECT_C_HASH> ~project-c:* -@dangerous -@admin -@connection
+
+# Read-only user for monitoring
+user readonly on #<READONLY_HASH> ~* +@read -@dangerous -@admin -@connection -@write

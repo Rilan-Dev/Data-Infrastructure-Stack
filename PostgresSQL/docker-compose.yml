@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres-db
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    ports:
+      - "0.0.0.0:65432:5432"
+
+    volumes:
+      # persistent database storage
+      - postgres_data:/var/lib/postgresql/data
+
+      # initialization scripts
+      - ./postgres/init:/docker-entrypoint-initdb.d
+
+      # custom configs
+      - ./postgres/config/postgresql.conf:/etc/postgresql/postgresql.conf
+      # - ./postgres/config/pg_hba.conf:/etc/postgresql/pg_hba.conf
+
+      # external logs (separate from data dir)
+      - ./postgres/logs:/var/log/postgresql
+
+      # backup directory
+      - ./postgres/backups:/backups
+
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+    # -c hba_file=/etc/postgresql/pg_hba.conf
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - postgres_network
+
+volumes:
+  postgres_data:
+
+networks:
+  postgres_network:
+    driver: bridge

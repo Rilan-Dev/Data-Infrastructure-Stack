@@ -1,0 +1,117 @@
+# =============================================================================
+# REDIS PRODUCTION DEPLOYMENT — Shared Infrastructure (0.0.0.0 binding)
+# =============================================================================
+
+services:
+  redis:
+    image: redis:7.4.1-alpine
+    container_name: redis
+    restart: unless-stopped
+
+    # Expose on all interfaces
+    ports:
+      - "0.0.0.0:6379:6379"
+
+    # Resource limits
+    mem_limit: ${REDIS_MEM_LIMIT:-2g}
+    mem_reservation: ${REDIS_MEM_RESERVATION:-1g}
+    cpus: ${REDIS_CPUS:-0.5}
+    pids_limit: ${REDIS_PIDS_LIMIT:-128}
+    ulimits:
+      nofile:
+        soft: ${REDIS_ULIMIT_NOFILE:-65536}
+        hard: ${REDIS_ULIMIT_NOFILE:-65536}
+
+    # Security hardening
+    tmpfs:
+      - /run:size=64m,noexec,nosuid,nodev
+      - /tmp:size=256m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Volumes
+    volumes:
+      - ${REDIS_DATA_HOST:-/docker/redis/data}:/data
+      - ${REDIS_SNAPSHOTS_HOST:-/docker/redis/snapshots}:/snapshots
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./config/entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+
+    # Custom entrypoint
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--aclfile", "/tmp/users.acl"]
+
+    # Environment
+    environment:
+      - REDIS_PASSWORD=${REDIS_ADMIN_PASSWORD}
+      - REDIS_ADMIN_PASSWORD=${REDIS_ADMIN_PASSWORD}
+      - REDIS_PROJECT_A_PASSWORD=${REDIS_PROJECT_A_PASSWORD}
+      - REDIS_PROJECT_B_PASSWORD=${REDIS_PROJECT_B_PASSWORD}
+      - REDIS_PROJECT_C_PASSWORD=${REDIS_PROJECT_C_PASSWORD}
+      - REDIS_PROJECT_D_PASSWORD=${REDIS_PROJECT_D_PASSWORD}
+      - REDIS_PROJECT_E_PASSWORD=${REDIS_PROJECT_E_PASSWORD}
+      - REDIS_OMNIROUTE_PASSWORD=${REDIS_OMNIROUTE_PASSWORD}
+      - REDIS_READONLY_PASSWORD=${REDIS_READONLY_PASSWORD}
+
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --user admin -a $${REDIS_ADMIN_PASSWORD} ping | grep -q PONG"]
+      interval: ${REDIS_HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${REDIS_HEALTHCHECK_TIMEOUT:-5s}
+      retries: ${REDIS_HEALTHCHECK_RETRIES:-5}
+      start_period: ${REDIS_HEALTHCHECK_START_PERIOD:-30s}
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    labels:
+      - "com.project=redis"
+      - "com.environment=production"
+      - "com.backup.enabled=true"
+      - "com.backup.type=redis-rdb"
+
+  # Snapshot backup sidecar
+  redis-backup:
+    image: redis:7.4.1-alpine
+    container_name: redis-backup
+    restart: unless-stopped
+    environment:
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD}
+      SNAPSHOT_RETENTION: ${REDIS_SNAPSHOT_RETENTION:-7}
+    entrypoint: >
+      /bin/sh -c '
+        echo "Starting Redis backup sidecar..."
+        while true; do
+          NOW=$$(date +%s)
+          TARGET=$$(date -d "03:00" +%s 2>/dev/null || date -j -f "%H:%M" "03:00" +%s 2>/dev/null)
+          if [ $$TARGET -le $$NOW ]; then
+            TARGET=$$(($$TARGET + 86400))
+          fi
+          SLEEP=$$(($$TARGET - $$NOW))
+          echo "Next backup in $$SLEEP seconds"
+          sleep $$SLEEP
+          
+          echo "Creating RDB snapshot..."
+          STAMP=$$(date +%Y%m%d-%H%M%S)
+          redis-cli --user admin -h 127.0.0.1 -a "$$REDIS_ADMIN_PASSWORD" --rdb "/snapshots/dump-$${STAMP}.rdb"
+          echo "Created snapshot: dump-$${STAMP}.rdb"
+          
+          echo "Pruning old snapshots (keep ${REDIS_SNAPSHOT_RETENTION:-7})..."
+          ls -t /snapshots/dump-*.rdb 2>/dev/null | tail -n +$${REDIS_SNAPSHOT_RETENTION:-8} | \
+            while read OLD; do
+              [ -n "$$OLD" ] && rm -f "$$OLD" && echo "Deleted $$OLD"
+            done
+        done
+      '
+    volumes:
+      - ${REDIS_SNAPSHOTS_HOST:-/docker/redis/snapshots}:/snapshots
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - backup

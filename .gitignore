@@ -1,0 +1,68 @@
+# =============================================================================
+# Data-Infrastructure-Stack .gitignore
+# Docker Compose stack for Neo4j, PostgreSQL, Qdrant, RabbitMQ, Redis
+# Only compose files, configs, scripts, and docs should be version controlled.
+# All runtime data, secrets, backups, and logs are excluded.
+# =============================================================================
+
+# --- Environment / secrets ------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+**/secrets/
+**/*secret*
+!**/*secret*.example
+neo4j-production/secrets/
+neo4j-production/data/dbms/auth.ini
+
+# --- Certificates / keys ----------------------------------------------------
+**/certificates/
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+*.csr
+*.srl
+*.bak-*
+
+# --- Runtime data volumes ----------------------------------------------------
+neo4j-production/data/
+neo4j-production/import/
+neo4j-production/plugins/
+PostgresSQL/postgres/data/
+qdrant/storage/
+qdrant/tmp/
+rabbitmq/data/
+redis/data/
+
+# --- Logs --------------------------------------------------------------------
+**/logs/
+*.log
+*.log.*
+
+# --- Backups / snapshots -------------------------------------------------
+**/backups/
+**/backup/
+**/snapshots/
+*.backup
+*.rdb
+*.sql.gz
+*.dump
+
+# --- RabbitMQ generated definitions ------------------------------------------
+rabbitmq/definitions/definitions.json
+
+# --- OS / editor artifacts ----------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# --- Misc ----------------------------------------------------------------
+*.tmp
+*.pid

@@ -1,0 +1,88 @@
+# =============================================================================
+# QDRANT PRODUCTION CONFIGURATION — Single Developer / ≤5 Projects
+# Merged with .env at runtime; sensitive values from environment
+# =============================================================================
+
+storage:
+  # On-disk storage for vectors (recommended for HDD / RAM-constrained)
+  # For small collections (<1M vectors) on SSD, you can set on_disk: false
+  on_disk: true
+  
+  # Performance tuning for HDD
+  # Qdrant uses mmap; these reduce seek overhead
+  storage_path: /qdrant/storage
+  snapshots_path: /qdrant/snapshots
+  
+  # WAL (write-ahead log) — keep on same volume for simplicity
+  # For production SSD, consider separate WAL volume
+  wal_path: /qdrant/storage/.wal
+  
+  # Optimizer settings for low-RAM / HDD
+  optimizer:
+    # Deferred indexing — don't index immediately on insert
+    deleted_threshold: 0.2
+    vacuum_min_vector_number: 1000
+    default_segment_number: 2
+    # Reduce max segment size to limit memory during optimization
+    max_segment_size: 200000000  # ~200MB
+    # Flush interval
+    flush_interval_sec: 10
+    # Indexing threshold — build HNSW index after N vectors
+    indexing_threshold: 20000
+
+service:
+  # Bind to all interfaces inside container (network is internal)
+  host: ${QDRANT_HOST:-0.0.0.0}
+  http_port: ${QDRANT_HTTP_PORT:-6333}
+  grpc_port: ${QDRANT_GRPC_PORT:-6334}
+  
+  # Enable API key authentication (required for multi-project)
+  api_key: ${QDRANT_API_KEY}
+  
+  # CORS — restrict to your domains
+  cors:
+    allow_origin:
+      - "https://neo4j.ostechnologies.in"
+      - "https://*.ostechnologies.in"
+      - "http://localhost:*"
+    allow_methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allow_headers:
+      - Authorization
+      - Content-Type
+      - api-key
+    max_age: 3600
+  
+  # Request limits — conservative for dev
+  max_request_size_mb: 32
+  max_batch_size: 1000
+  
+  # Timeout
+  request_timeout_sec: 30
+  
+  # Disable telemetry
+  telemetry_disabled: ${QDRANT_TELEMETRY_DISABLED:-true}
+
+log:
+  level: ${QDRANT_LOG_LEVEL:-INFO}
+  format: json
+  # File output (captured by Docker json-file driver)
+  # No need for separate file in container
+
+# Cluster settings (single-node — no consensus needed)
+cluster:
+  enabled: false
+
+# Experimental features — none for production
+experimental: {}
+
+# Snapshot settings
+snapshots:
+  # Snapshot storage path (mounted from host)
+  path: /qdrant/snapshots
+  # Online snapshots (no downtime)
+  online: true

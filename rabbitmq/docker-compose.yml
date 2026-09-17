@@ -1,0 +1,70 @@
+# =============================================================================
+# RABBITMQ PRODUCTION DEPLOYMENT — Shared Infrastructure (0.0.0.0 binding)
+# =============================================================================
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+
+    # Expose on all interfaces
+    ports:
+      - "0.0.0.0:5672:5672"
+      - "0.0.0.0:15672:15672"
+      - "0.0.0.0:5671:5671"
+      - "0.0.0.0:4369:4369"
+      - "0.0.0.0:25672:25672"
+
+    # Resource limits for 32GB host
+    mem_limit: ${RABBITMQ_MEM_LIMIT:-1g}
+    mem_reservation: ${RABBITMQ_MEM_RESERVATION:-512m}
+    cpus: ${RABBITMQ_CPUS:-0.5}
+    pids_limit: ${RABBITMQ_PIDS_LIMIT:-256}
+    ulimits:
+      nofile:
+        soft: ${RABBITMQ_ULIMIT_NOFILE:-65536}
+        hard: ${RABBITMQ_ULIMIT_NOFILE:-65536}
+
+    # Security hardening
+    tmpfs:
+      - /tmp:size=256m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+
+    # Volumes
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ${RABBITMQ_BACKUP_HOST:-/docker/rabbitmq/backup}:/backup
+
+    # Environment
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_ADMIN_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_ADMIN_PASSWORD}
+      - RABBITMQ_DEFAULT_VHOST=/
+      - RABBITMQ_DISK_FREE_LIMIT=2000000000
+
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: ${RABBITMQ_HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${RABBITMQ_HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${RABBITMQ_HEALTHCHECK_RETRIES:-5}
+      start_period: ${RABBITMQ_HEALTHCHECK_START_PERIOD:-60s}
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    labels:
+      - "com.project=rabbitmq"
+      - "com.environment=production"
+      - "com.backup.enabled=true"
+      - "com.backup.type=rabbitmq-definitions"
+
+volumes:
+  rabbitmq_data:
+    driver: local

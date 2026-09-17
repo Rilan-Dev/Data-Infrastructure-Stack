@@ -1,0 +1,154 @@
+# =============================================================================
+# QDRANT PRODUCTION DEPLOYMENT — Single Developer / ≤5 Projects
+# Hardware: Xeon E3-1220 v3 (4C/4T), 32GB RAM, 2× HDD
+# Run: docker compose --env-file .env up -d
+# =============================================================================
+
+services:
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_VERSION:-v1.12.2-unprivileged}
+    container_name: qdrant
+    restart: unless-stopped
+
+    # Expose only to localhost for Cloudflare Tunnel (host network)
+    ports:
+      - "0.0.0.0:6333:6333"
+      - "127.0.0.1:6334:6334"
+
+    # Internal network for apps
+    networks:
+      - qdrant
+    expose:
+      - "6333"
+      - "6334"
+
+    # Resource limits — conservative for shared server
+    mem_limit: ${QDRANT_MEM_LIMIT:-6g}
+    mem_reservation: ${QDRANT_MEM_RESERVATION:-3g}
+    cpus: ${QDRANT_CPUS:-1.5}
+    pids_limit: ${QDRANT_PIDS_LIMIT:-256}
+    ulimits:
+      nofile:
+        soft: ${QDRANT_ULIMIT_NOFILE:-65536}
+        hard: ${QDRANT_ULIMIT_NOFILE:-65536}
+
+    # Security hardening (per Qdrant recommendations)
+    read_only: true
+    tmpfs:
+      - /run:size=64m,noexec,nosuid,nodev
+      - /tmp:size=256m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Volumes — persistent storage
+    volumes:
+      - ${QDRANT_STORAGE_HOST:-/docker/qdrant/storage}:/qdrant/storage
+      - ${QDRANT_SNAPSHOTS_HOST:-/docker/qdrant/snapshots}:/qdrant/snapshots
+      - ./config/production.yaml:/qdrant/config/production.yaml:ro
+
+    # Environment — non-sensitive config only
+    environment:
+      QDRANT__SERVICE__HOST: ${QDRANT_HOST:-0.0.0.0}
+      QDRANT__SERVICE__HTTP_PORT: ${QDRANT_HTTP_PORT:-6333}
+      QDRANT__SERVICE__GRPC_PORT: ${QDRANT_GRPC_PORT:-6334}
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+      QDRANT__SERVICE__TELEMETRY_DISABLED: ${QDRANT_TELEMETRY_DISABLED:-true}
+      QDRANT__LOG__LEVEL: ${QDRANT_LOG_LEVEL:-INFO}
+      QDRANT__STORAGE__ON_DISK: "true"
+      QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
+      QDRANT__STORAGE__SNAPSHOTS_PATH: /qdrant/snapshots
+      QDRANT__OPTIMIZER__DELETED_THRESHOLD: 0.2
+      QDRANT__OPTIMIZER__VACUUM_MIN_VECTOR_NUMBER: 1000
+      QDRANT__OPTIMIZER__MAX_SEGMENT_SIZE: 200000000
+      QDRANT__OPTIMIZER__FLUSH_INTERVAL_SEC: 10
+      QDRANT__OPTIMIZER__INDEXING_THRESHOLD: 20000
+
+    # Health check — bash TCP check
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/6333' && exit 0 || exit 1"]
+      interval: ${QDRANT_HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${QDRANT_HEALTHCHECK_TIMEOUT:-5s}
+      retries: ${QDRANT_HEALTHCHECK_RETRIES:-5}
+      start_period: ${QDRANT_HEALTHCHECK_START_PERIOD:-60s}
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    # Labels for monitoring / backup tools
+    labels:
+      - "com.project=qdrant"
+      - "com.environment=production"
+      - "com.backup.enabled=true"
+      - "com.backup.type=qdrant-snapshot"
+
+  # Snapshot backup sidecar — runs daily, prunes old snapshots
+  qdrant-backup:
+    image: curlimages/curl:8.11.0
+    container_name: qdrant-backup
+    restart: unless-stopped
+    networks:
+      - qdrant
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      SNAPSHOT_RETENTION: ${QDRANT_SNAPSHOT_RETENTION:-7}
+    entrypoint: >
+      /bin/sh -c '
+        echo "Starting Qdrant backup sidecar..."
+        while true; do
+          NOW=$$(date +%s)
+          TARGET=$$(date -d "03:00" +%s 2>/dev/null || date -j -f "%H:%M" "03:00" +%s 2>/dev/null)
+          if [ $$TARGET -le $$NOW ]; then
+            TARGET=$$(($$TARGET + 86400))
+          fi
+          SLEEP=$$(($$TARGET - $$NOW))
+          echo "Next backup in $$SLEEP seconds"
+          sleep $$SLEEP
+          
+          echo "Creating snapshot..."
+          SNAPSHOT=$$(curl -s -X POST "$$QDRANT_URL/snapshots" \
+            -H "api-key: $$QDRANT_API_KEY" | jq -r .result.name)
+          echo "Created snapshot: $$SNAPSHOT"
+          
+          echo "Pruning old snapshots (keep ${QDRANT_SNAPSHOT_RETENTION:-7})...."
+          curl -s -X GET "$$QDRANT_URL/snapshots" -H "api-key: $$QDRANT_API_KEY" | \
+            jq -r ".result[] | select(.name != \"$$SNAPSHOT\") | .name" | \
+            sort | head -n -${QDRANT_SNAPSHOT_RETENTION:-7} | \
+            while read OLD; do
+              [ -n "$$OLD" ] && curl -s -X DELETE "$$QDRANT_URL/snapshots/$$OLD" -H "api-key: $$QDRANT_API_KEY" && echo "Deleted $$OLD"
+            done
+        done
+      '
+    volumes:
+      - ${QDRANT_SNAPSHOTS_HOST:-/docker/qdrant/snapshots}:/qdrant/snapshots:ro
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    profiles:
+      - backup
+
+networks:
+  qdrant:
+    name: ${QDRANT_NETWORK_NAME:-platform-qdrant}
+    internal: true
+    driver: bridge
+
+volumes:
+  qdrant_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${QDRANT_STORAGE_HOST:-/docker/qdrant/storage}
+  qdrant_snapshots:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${QDRANT_SNAPSHOTS_HOST:-/docker/qdrant/snapshots}
