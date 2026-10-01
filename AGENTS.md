@@ -15,6 +15,7 @@ flowchart TD
     A --> D[Qdrant]
     A --> E[RabbitMQ]
     A --> F[Redis]
+    A --> G[Monitoring]
 ```
 
 | Service | Purpose | Isolation | Access Pattern |
@@ -24,6 +25,7 @@ flowchart TD
 | **Qdrant** | Vector database | Internal network `platform-qdrant` | `127.0.0.1:6334` (gRPC) |
 | **RabbitMQ** | Message broker | Dedicated container | `0.0.0.0:5672,15672,5671,4369,25672` (host) |
 | **Redis** | Cache / key-value store | Dedicated container | `0.0.0.0:6379` (host) |
+| **Monitoring** | Metrics, alerting, dashboards (Prometheus / Alertmanager / Grafana) | Internal network `monitoring` | `127.0.0.1` only — `9490`, `9493`, `3090` |
 
 Each service is independently deployable, independently backed up, and independently documented.
 
