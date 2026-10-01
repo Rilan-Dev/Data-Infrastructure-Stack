@@ -1,0 +1,43 @@
+# =============================================================================
+# Prometheus for the Data Infrastructure Stack.
+#
+# Scope today: the Paperclip credential-broker identity signal (RILAAA-81).
+# Add further scrape jobs here as services grow metrics endpoints; the rule
+# files are split per subject so they stay independently testable.
+# =============================================================================
+
+global:
+  # The exporter query has a 15-minute window, so a fast scrape buys nothing.
+  # 30s keeps alert latency well inside the 15-minute warning budget while
+  # keeping the series count and DB query load trivial.
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    host: rilu-platform
+    stack: data-infrastructure
+
+rule_files:
+  - /etc/prometheus/rules/*.rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # Prometheus' own health, so "is the alerting pipeline alive" is answerable.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  # Paperclip control-plane identity contexts. `up` for this job is itself a
+  # first-class signal: if the exporter cannot reach Postgres we lose the
+  # ability to see broker outages, which is alerted on separately.
+  - job_name: paperclip-identity
+    static_configs:
+      - targets: ["paperclip-identity-exporter:9187"]
