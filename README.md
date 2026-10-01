@@ -15,6 +15,7 @@ Self-hosted, Docker Compose–based data infrastructure for a single production 
 | **Qdrant** | `qdrant/qdrant:v1.12.2-unprivileged` | Vector database (multi-project, API-key scoped) | Internal network `platform-qdrant` + `127.0.0.1:6334` | [`qdrant/README.md`](./qdrant/README.md) |
 | **RabbitMQ** | `rabbitmq:3.13-management-alpine` | Message broker + management UI | `0.0.0.0:5672,15672,5671,4369,25672` | [`rabbitmq/`](./rabbitmq) |
 | **Redis** | `redis:7.4.1-alpine` | Cache / key-value store (ACL multi-user) | `0.0.0.0:6379` | [`redis/README.md`](./redis/README.md) |
+| **Monitoring** | `prom/prometheus` + `prom/alertmanager` + `grafana/grafana` | Metrics, alerting, and dashboards for the platform | `127.0.0.1:9490` (Prometheus), `127.0.0.1:9493` (Alertmanager), `127.0.0.1:3090` (Grafana) | [`monitoring/README.md`](./monitoring/README.md) |
 
 Each service directory is **self-contained**: its own `docker-compose.yml`, `.env` (not committed), config files, backup scripts, and volumes. There is intentionally **no root-level `docker-compose.yml`** — services are started/stopped independently.
 
@@ -103,6 +104,7 @@ docker compose ps
 | Qdrant | `cd qdrant && docker compose up -d` |
 | RabbitMQ | `cd rabbitmq && docker compose up -d` |
 | Redis | `cd redis && docker compose up -d` |
+| Monitoring | `cd monitoring && docker compose up -d` |
 
 See each service's README/runbook for credentials, health checks, backup/restore procedures, and troubleshooting.
 
@@ -113,6 +115,7 @@ See each service's README/runbook for credentials, health checks, backup/restore
 - **Never commit `.env` files.** Only `.env.example` (placeholder values) is tracked in git.
 - Neo4j uses a **Docker secret file** (`neo4j-production/secrets/neo4j_auth`) instead of an env var for credentials.
 - Redis uses **ACL-based multi-user auth** (`redis/config/users.acl`) — passwords are injected via environment variables at container start, not hardcoded in the ACL file.
+- Monitoring keeps the Alertmanager SMTP key in a **mode-600 file** (`monitoring/alertmanager/secrets/smtp_password`) referenced via `smtp_auth_password_file`, which is what keeps `alertmanager.yml` committable.
 - Qdrant uses a **7-key, per-project API key scheme** — see [`qdrant/README.md`](./qdrant/README.md).
 - All credential material, TLS certificates, backups, snapshots, and runtime data directories are excluded via [`.gitignore`](./.gitignore).
 
@@ -133,6 +136,7 @@ This should return nothing — if it does, something sensitive may be staged.
 | Qdrant | REST snapshot API via `qdrant-backup` sidecar (daily, 03:00) | `qdrant/snapshots/` |
 | RabbitMQ | Definitions export (`rabbitmqadmin export`) | `rabbitmq/backup/` |
 | Redis | `redis-cli --rdb` via `redis-backup` sidecar (daily, 03:00) | `redis/snapshots/` |
+| Monitoring | None by design — the TSDB is derived from `run_identity_contexts` and rebuilds itself; all config is in git | n/a |
 
 **Off-host copies are not automated** — each service's backup script/sidecar writes locally only. Periodically sync `*/backups/` and `*/snapshots/` to object storage or a remote host.
 
@@ -146,6 +150,7 @@ This should return nothing — if it does, something sensitive may be staged.
 - [`qdrant/README.md`](./qdrant/README.md) — Qdrant runbook (quick start, API keys, collections, quantization, monitoring, upgrade, troubleshooting)
 - [`rabbitmq/README.md`](./rabbitmq/README.md) — RabbitMQ runbook (quick start, management UI, definitions, backup/restore, troubleshooting)
 - [`redis/README.md`](./redis/README.md) — Redis runbook (quick start, ACL credentials, key naming, backup/restore, SSD migration notes)
+- [`monitoring/README.md`](./monitoring/README.md) — Monitoring runbook (Prometheus/Alertmanager/Grafana, per-alert response steps, least-privilege exporter role, secret rotation, rule testing)
 - [`neo4j-production/DoD-report.md`](./neo4j-production/DoD-report.md) — Neo4j deployment verification report (checklist, credentials, known warnings, operational notes)
 
 ---

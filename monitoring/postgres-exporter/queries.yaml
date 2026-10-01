@@ -1,0 +1,125 @@
+# =============================================================================
+# Custom postgres_exporter queries for the Paperclip control plane.
+#
+# The exporter runs with --disable-default-metrics --disable-settings-metrics,
+# so these are the ONLY queries it issues. That is deliberate: the default
+# collectors read pg_stat_* and pg_settings, which would force us to grant
+# pg_monitor to the exporter role. Keeping defaults off lets the role hold
+# exactly one privilege (SELECT on run_identity_contexts) — see
+# scripts/create-metrics-role.sql and scripts/verify-readonly.sh.
+#
+# Metric naming: postgres_exporter emits <top-level-key>_<column> for user
+# queries, so the keys below produce `paperclip_identity_context_*`.
+#
+# The `credential` column is a literal rather than derived so that adding a
+# second credential source later is a UNION ALL branch, not a metric rename.
+# run_identity_contexts currently carries one jsonb column (`github`); any
+# future column (e.g. `npm`, `docker`) slots in the same way and the existing
+# alert rules and dashboard keep working, filtered by label.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Windowed gauge: identity contexts in the trailing 15 minutes, by credential
+# source, wake cause, and broker verdict. Drives the warning alert and the
+# dashboard.
+#
+# The LEFT JOIN against every (cause, status) pair the table has ever seen is
+# the important part. The obvious `WHERE created_at > now() - 15m GROUP BY`
+# returns no row for a quiet pair, the series goes stale, and the Grafana panel
+# drops the line — which is exactly the invisibility that let RILAAA-75 run for
+# three days. Filling quiet pairs with an explicit 0 keeps every cause on the
+# chart continuously, so "this cause is flat at zero availability" is a line you
+# can see rather than a line that is missing.
+# ---------------------------------------------------------------------------
+paperclip_identity_context:
+  query: |
+    SELECT 'github'            AS credential,
+           d.cause             AS cause,
+           d.status            AS status,
+           COALESCE(w.n, 0)    AS window_count
+    FROM (
+      SELECT DISTINCT cause,
+                      COALESCE(github ->> 'status', 'unknown') AS status
+      FROM public.run_identity_contexts
+    ) d
+    LEFT JOIN (
+      SELECT cause,
+             COALESCE(github ->> 'status', 'unknown') AS status,
+             COUNT(*) AS n
+      FROM public.run_identity_contexts
+      WHERE created_at > now() - interval '15 minutes'
+      GROUP BY 1, 2
+    ) w ON w.cause = d.cause AND w.status = d.status
+  master: true
+  metrics:
+    - credential:
+        usage: "LABEL"
+        description: "Credential source the broker was asked for"
+    - cause:
+        usage: "LABEL"
+        description: "Wake cause of the run; company_default means an unattended heartbeat"
+    - status:
+        usage: "LABEL"
+        description: "Broker verdict: available, unavailable, or unknown"
+    - window_count:
+        usage: "GAUGE"
+        description: "Identity contexts recorded in the trailing 15 minutes"
+
+# ---------------------------------------------------------------------------
+# Cumulative counter. This is what the paging rule uses, and it exists because
+# the windowed gauge above cannot express "sustained".
+#
+# Unattended heartbeats fire every ~30 minutes, so a 15-minute window is EMPTY
+# roughly half the time even during a total outage. A rule of the form
+# `window_count > 0 for 30m` therefore resets on every quiet gap and would never
+# have paged for RILAAA-75 at all. A monotonic counter is immune to that: an
+# `increase(...[35m])` lookback spans at least one full heartbeat cycle no matter
+# where the gaps fall. See prometheus/rules/paperclip-identity.rules.yml.
+#
+# Cost note: this is an unbounded COUNT(*) over the table, seq-scanned every 30s.
+# Fine at the current size (low thousands of rows). If run_identity_contexts ever
+# grows into the millions, add an index on (cause, created_at) or prune old rows
+# rather than shortening the window — shortening it reintroduces the gap bug.
+# ---------------------------------------------------------------------------
+paperclip_identity_context_cumulative:
+  query: |
+    SELECT 'github'                                 AS credential,
+           cause                                    AS cause,
+           COALESCE(github ->> 'status', 'unknown') AS status,
+           COUNT(*)                                 AS total
+    FROM public.run_identity_contexts
+    GROUP BY 1, 2, 3
+  master: true
+  metrics:
+    - credential:
+        usage: "LABEL"
+        description: "Credential source the broker was asked for"
+    - cause:
+        usage: "LABEL"
+        description: "Wake cause of the run; company_default means an unattended heartbeat"
+    - status:
+        usage: "LABEL"
+        description: "Broker verdict: available, unavailable, or unknown"
+    - total:
+        usage: "COUNTER"
+        description: "Identity contexts recorded since the table was last pruned"
+
+# ---------------------------------------------------------------------------
+# Liveness gauge: seconds since the newest identity context of any kind.
+#
+# Closes the remaining blind spot. If the control plane stops creating runs
+# altogether, every count above legitimately reads 0 and the alerts stay quiet.
+# Age-of-newest-row distinguishes "broker is fine" from "nothing is running".
+# ---------------------------------------------------------------------------
+paperclip_identity_context_freshness:
+  query: |
+    SELECT COALESCE(
+             EXTRACT(EPOCH FROM (now() - MAX(created_at))),
+             -1
+           ) AS seconds
+    FROM public.run_identity_contexts
+  master: true
+  metrics:
+    - seconds:
+        usage: "GAUGE"
+        description: "Age in seconds of the newest identity context; -1 when the table is empty"

@@ -6,8 +6,6 @@
 # =============================================================================
 
 # --- Environment / secrets ------------------------------------------------
-.env
-.env.*
 !.env.example
 *.env
 **/secrets/
@@ -31,6 +29,7 @@ neo4j-production/data/dbms/auth.ini
 neo4j-production/data/
 neo4j-production/import/
 neo4j-production/plugins/
+temp_auto_push.bat
 PostgresSQL/postgres/data/
 qdrant/storage/
 qdrant/tmp/
@@ -60,9 +59,11 @@ Thumbs.db
 *.swp
 *.swo
 *~
-.vscode/
 .idea/
 
 # --- Misc ----------------------------------------------------------------
 *.tmp
 *.pid
+branch_structure.json
+config.bat
+node_modules
