@@ -1,0 +1,68 @@
+# =============================================================================
+# promtool unit tests for alerting-pipeline.rules.yml
+# =============================================================================
+
+rule_files:
+  - ../rules/alerting-pipeline.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: delivery failures surface instead of passing as silence
+    interval: 1m
+    input_series:
+      # Healthy for 20m, then every notification attempt fails. The `reason`
+      # label mirrors the real metric — Alertmanager splits failures by reason,
+      # and the rule has to aggregate it away or a single broken receiver raises
+      # one alert per failure mode.
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager",instance="alertmanager:9093",integration="email",reason="clientError"}'
+        values: "0+0x20 0+1x40"
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager",instance="alertmanager:9093",integration="email",reason="serverError"}'
+        values: "0+0x60"
+
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AlertmanagerNotificationsFailing
+        exp_alerts: []
+      # Failures start at 21m; `for: 10m` puts the first firing at ~31m.
+      - eval_time: 25m
+        alertname: AlertmanagerNotificationsFailing
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: AlertmanagerNotificationsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: monitoring
+              component: alertmanager
+              integration: email
+            exp_annotations:
+              summary: "Alertmanager failed to deliver notifications via email"
+              description: "Alertmanager has accepted alerts but could not deliver them over email for 10 minutes. Every alert in this stack is currently silent. Most likely the Resend API key in alertmanager/secrets/smtp_password is missing, expired, or the sending domain is unverified."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#alertmanagernotificationsfailing"
+
+  - name: prometheus with no alertmanager is reported
+    interval: 1m
+    input_series:
+      - series: 'up{job="alertmanager",instance="alertmanager:9093"}'
+        values: "0+0x30"
+      - series: 'prometheus_notifications_alertmanagers_discovered{job="prometheus",instance="localhost:9090"}'
+        values: "1+0x30"
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AlertmanagerUnreachable
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: AlertmanagerUnreachable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: monitoring
+              component: alertmanager
+              job: alertmanager
+              instance: alertmanager:9093
+            exp_annotations:
+              summary: "Prometheus has no reachable Alertmanager"
+              description: "Prometheus is evaluating alert rules but has nowhere to send them. Check that the alertmanager container is up on the `monitoring` network and that prometheus.yml still points at alertmanager:9093."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#alertmanagerunreachable"

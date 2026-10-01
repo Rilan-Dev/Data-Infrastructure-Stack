@@ -1,0 +1,73 @@
+# =============================================================================
+# Alertmanager routing for the platform stack.
+#
+# No secret appears in this file. The SMTP password is read from
+# secrets/smtp_password (gitignored, mode 600, written by
+# ../scripts/provision-alert-email.sh), which is why this config is safe to
+# commit.
+#
+# Delivery uses the Resend free tier — the only email channel the board has
+# already approved. No new recurring spend.
+#
+# IMPORTANT: a notification path that silently fails is the same class of bug as
+# RILAAA-75, so Prometheus alerts on alertmanager_notifications_failed_total
+# (see prometheus/rules/alerting-pipeline.rules.yml). Do not remove that rule.
+# =============================================================================
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: smtp.resend.com:587
+  smtp_from: alerts@info.ostechnologies.in
+  # Resend's SMTP bridge always uses the literal username "resend"; the API key
+  # is the password.
+  smtp_auth_username: resend
+  smtp_auth_password_file: /etc/alertmanager/secrets/smtp_password
+  smtp_require_tls: true
+
+route:
+  # Group by the thing an operator acts on. Splitting on `cause` matters because
+  # "company_default is failing" and "manual_user_wake is failing" are different
+  # incidents with different fixes.
+  group_by: [alertname, service, component, cause]
+  group_wait: 30s
+  group_interval: 5m
+  # Deliberately long: a credential-broker outage is a standing condition, not
+  # something to re-mail every 5 minutes while someone is already fixing it.
+  repeat_interval: 4h
+  receiver: platform-email
+
+  routes:
+    # Pages repeat faster than the default.
+    - matchers:
+        - severity = critical
+      receiver: platform-email
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # `info` is context for a human reading the dashboard, not something to mail
+    # about on its own. It stays visible in the Alertmanager UI and in Grafana.
+    - matchers:
+        - severity = info
+      receiver: "null"
+      repeat_interval: 24h
+
+inhibit_rules:
+  # Once the sustained/critical version of an alert is firing, the warning for
+  # the same broker/cause is redundant noise.
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
+    equal: [service, component, cause]
+
+receivers:
+  - name: "null"
+
+  - name: platform-email
+    email_configs:
+      - to: mohammedrilan.ksa@gmail.com
+        send_resolved: true
+        headers:
+          Subject: >-
+            [{{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.service }}
+            {{ .CommonLabels.alertname }} ({{ .Alerts.Firing | len }} firing)

@@ -1,0 +1,57 @@
+# =============================================================================
+# Meta-monitoring: does the alerting pipeline itself work?
+#
+# This exists because RILAAA-81's whole point is that a silent failure is worse
+# than a loud one. An Alertmanager whose SMTP credential is wrong would accept
+# every alert and deliver none — indistinguishable from "nothing is wrong" from
+# the outside. These rules make that state visible.
+# =============================================================================
+
+groups:
+  - name: alerting-pipeline
+    interval: 30s
+    rules:
+      # Alertmanager is accepting alerts but cannot deliver them.
+      #
+      # Summed by integration on purpose: the raw metric is also split by
+      # `reason` (clientError, serverError, other, …), which would otherwise
+      # produce one duplicate alert per failure mode for a single broken
+      # receiver. Note the counter only moves once Alertmanager exhausts its
+      # retries, so expect this to trail the first failed attempt by minutes.
+      - alert: AlertmanagerNotificationsFailing
+        expr: |
+          sum by (integration) (increase(alertmanager_notifications_failed_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: monitoring
+          component: alertmanager
+        annotations:
+          summary: Alertmanager failed to deliver notifications via {{ $labels.integration }}
+          description: >-
+            Alertmanager has accepted alerts but could not deliver them over
+            {{ $labels.integration }} for 10 minutes. Every alert in this stack is
+            currently silent. Most likely the Resend API key in
+            alertmanager/secrets/smtp_password is missing, expired, or the sending
+            domain is unverified.
+          runbook_url: https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#alertmanagernotificationsfailing
+
+      # Prometheus cannot reach Alertmanager at all: alerts evaluate but go
+      # nowhere. Distinct from the above, and a different fix.
+      - alert: AlertmanagerUnreachable
+        expr: |
+          up{job="alertmanager"} == 0
+          or
+          prometheus_notifications_alertmanagers_discovered < 1
+        for: 10m
+        labels:
+          severity: warning
+          service: monitoring
+          component: alertmanager
+        annotations:
+          summary: Prometheus has no reachable Alertmanager
+          description: >-
+            Prometheus is evaluating alert rules but has nowhere to send them.
+            Check that the alertmanager container is up on the `monitoring`
+            network and that prometheus.yml still points at alertmanager:9093.
+          runbook_url: https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#alertmanagerunreachable

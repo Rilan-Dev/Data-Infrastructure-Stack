@@ -1,0 +1,252 @@
+# =============================================================================
+# promtool unit tests for paperclip-identity.rules.yml
+#
+# Run with ../../scripts/test-rules.sh. These are the acceptance evidence for
+# RILAAA-81: the alert must fire on the RILAAA-75 shape (one cause at 0%
+# availability while every other cause is healthy) and must resolve on its own
+# when the broker starts handing out identities again.
+#
+# Test 2 is the one that matters most. It models the REAL arrival pattern —
+# unattended heartbeats every ~30 minutes, so the 15-minute window is empty half
+# the time — and pins the paging rule against it. The earlier
+# `window_count > 0 for 30m` formulation passed the naive always-positive test
+# and would still never have paged in production.
+# =============================================================================
+
+rule_files:
+  - ../rules/paperclip-identity.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # ---------------------------------------------------------------------------
+  # 1. The RILAAA-75 shape: unattended runs denied, user-attributed runs fine.
+  # ---------------------------------------------------------------------------
+  - name: unattended identity outage while user-attributed runs stay healthy
+    interval: 1m
+    input_series:
+      # Cumulative counters feed the dashboard ratio; the window gauge feeds the
+      # warning alert. Both are present because the dashboard and the alert
+      # deliberately read different signals.
+      - series: 'paperclip_identity_context_cumulative_total{job="paperclip-identity",credential="github",cause="company_default",status="unavailable"}'
+        values: "0+0x9 4+0x100"
+      - series: 'paperclip_identity_context_cumulative_total{job="paperclip-identity",credential="github",cause="manual_user_wake",status="available"}'
+        values: "0+0x9 3+0x100"
+      - series: 'paperclip_identity_context_window_count{job="paperclip-identity",credential="github",cause="company_default",status="unavailable"}'
+        values: "4+0x60"
+      - series: 'paperclip_identity_context_window_count{job="paperclip-identity",credential="github",cause="manual_user_wake",status="available"}'
+        values: "3+0x60"
+
+    promql_expr_test:
+      # The panel must show company_default at 0% and manual_user_wake at 100%.
+      # A blank line — or a NaN — for company_default here would reproduce the
+      # RILAAA-75 blind spot, so this is the assertion that pins both the
+      # `or ... * 0` numerator and the `> 0` denominator guard.
+      - expr: paperclip:identity_availability_ratio:1h
+        eval_time: 40m
+        exp_samples:
+          - labels: 'paperclip:identity_availability_ratio:1h{cause="company_default",credential="github"}'
+            value: 0
+          - labels: 'paperclip:identity_availability_ratio:1h{cause="manual_user_wake",credential="github"}'
+            value: 1
+
+    alert_rule_test:
+      # Warning is immediate: no `for` delay on top of the 15m query window.
+      - eval_time: 1m
+        alertname: PaperclipUnattendedIdentityUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: paperclip
+              component: credential-broker
+              job: paperclip-identity
+              credential: github
+              cause: company_default
+              status: unavailable
+            exp_annotations:
+              summary: "Paperclip github broker returned no identity for 4 unattended run(s) in the last 15m"
+              description: "cause=company_default status=unavailable credential=github. Unattended engineer heartbeats cannot commit or push right now, and they will degrade silently (`fatal: empty ident name`) rather than fail loudly. Expected steady state is zero. This is the RILAAA-75 failure mode."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipunattendedidentityunavailable"
+
+      # A healthy cause must never look stale.
+      - eval_time: 45m
+        alertname: PaperclipIdentityContextsStale
+        exp_alerts: []
+
+  # ---------------------------------------------------------------------------
+  # 2. REGRESSION TEST for the gap bug.
+  #
+  #    Unattended heartbeats land every ~30 minutes. The counter below steps up
+  #    by 4 denials at t=10m, t=40m and t=70m; the windowed gauge is positive for
+  #    only 15 minutes after each step and sits at 0 in between. Under those
+  #    conditions the page MUST still fire, and it must fire during a quiet gap
+  #    (t=30m, t=65m and t=100m are all gaps), because that is where the old
+  #    `window_count > 0 for 30m` rule silently reset itself.
+  # ---------------------------------------------------------------------------
+  - name: paging rule survives the 30-minute heartbeat gap
+    interval: 1m
+    input_series:
+      # Monotonic counter, stepping by 4 denials at t=10m, t=40m and t=70m.
+      # Bursts 30m apart against a 35m lookback: every evaluation sees a step.
+      - series: 'paperclip_identity_context_cumulative_total{job="paperclip-identity",credential="github",cause="company_default",status="unavailable"}'
+        values: "0+0x9 4+0x29 8+0x29 12+0x40"
+      # The same bursts through the 15-minute window gauge, which really does
+      # fall back to zero for 15 minutes after each burst.
+      - series: 'paperclip_identity_context_window_count{job="paperclip-identity",credential="github",cause="company_default",status="unavailable"}'
+        values: "0+0x9 4+0x14 0+0x14 4+0x14 0+0x14 4+0x14 0+0x25"
+
+    promql_expr_test:
+      # Proof that the gauge is genuinely zero mid-gap — this is what made the
+      # naive `for: 30m` formulation unfireable.
+      - expr: paperclip_identity_context_window_count{cause="company_default",status="unavailable"}
+        eval_time: 30m
+        exp_samples:
+          - labels: 'paperclip_identity_context_window_count{job="paperclip-identity",credential="github",cause="company_default",status="unavailable"}'
+            value: 0
+
+    alert_rule_test:
+      # Warning correctly comes and goes with the window.
+      - eval_time: 15m
+        alertname: PaperclipUnattendedIdentityUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: paperclip
+              component: credential-broker
+              job: paperclip-identity
+              credential: github
+              cause: company_default
+              status: unavailable
+            exp_annotations:
+              summary: "Paperclip github broker returned no identity for 4 unattended run(s) in the last 15m"
+              description: "cause=company_default status=unavailable credential=github. Unattended engineer heartbeats cannot commit or push right now, and they will degrade silently (`fatal: empty ident name`) rather than fail loudly. Expected steady state is zero. This is the RILAAA-75 failure mode."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipunattendedidentityunavailable"
+      - eval_time: 30m
+        alertname: PaperclipUnattendedIdentityUnavailable
+        exp_alerts: []
+
+      # The page fires from the counter and stays up straight through the gaps.
+      - eval_time: 25m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts: &sustained_alert
+          - exp_labels:
+              severity: critical
+              service: paperclip
+              component: credential-broker
+              credential: github
+              cause: company_default
+            exp_annotations:
+              summary: "Paperclip github broker has denied every unattended identity for a full heartbeat cycle"
+              description: "Sustained credential-broker outage for cause=company_default: denials and zero successes across the last 35 minutes, which spans at least one complete unattended heartbeat cycle. Every unattended engineer is unable to commit. Check the GitHub user-grant agent delegation first — that was the root cause in RILAAA-75."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipunattendedidentityunavailable"
+      - eval_time: 30m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts: *sustained_alert
+      - eval_time: 50m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts: *sustained_alert
+      - eval_time: 65m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts: *sustained_alert
+      - eval_time: 100m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts: *sustained_alert
+
+  # ---------------------------------------------------------------------------
+  # 3. Recovery. Once the broker starts working the page must clear on its own,
+  #    and a cause that is only partly failing must not page (the `unless`).
+  # ---------------------------------------------------------------------------
+  - name: page clears once the broker hands out identities again
+    interval: 1m
+    input_series:
+      # Denials step at t=10m and t=40m, then stop climbing for good.
+      - series: 'paperclip_identity_context_cumulative_total{job="paperclip-identity",credential="github",cause="company_default",status="unavailable"}'
+        values: "0+0x9 4+0x29 8+0x90"
+      # Successes begin at t=41m under the same cause.
+      - series: 'paperclip_identity_context_cumulative_total{job="paperclip-identity",credential="github",cause="company_default",status="available"}'
+        values: "0+0x40 4+0x89"
+
+    alert_rule_test:
+      # Still paging at t=30m: denials, no successes yet.
+      - eval_time: 30m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: paperclip
+              component: credential-broker
+              credential: github
+              cause: company_default
+            exp_annotations:
+              summary: "Paperclip github broker has denied every unattended identity for a full heartbeat cycle"
+              description: "Sustained credential-broker outage for cause=company_default: denials and zero successes across the last 35 minutes, which spans at least one complete unattended heartbeat cycle. Every unattended engineer is unable to commit. Check the GitHub user-grant agent delegation first — that was the root cause in RILAAA-75."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipunattendedidentityunavailable"
+
+      # `unless` suppresses the page the moment successes reappear, even though
+      # the denial increase is still inside the 35m lookback.
+      - eval_time: 50m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts: []
+      # ...and it stays clear once the denials fall out of the lookback entirely.
+      - eval_time: 100m
+        alertname: PaperclipUnattendedIdentityUnavailableSustained
+        exp_alerts: []
+
+  # ---------------------------------------------------------------------------
+  # 4. Meta-alert: losing the exporter must not look like health.
+  # ---------------------------------------------------------------------------
+  - name: exporter down is itself an alert
+    interval: 1m
+    input_series:
+      - series: 'up{job="paperclip-identity",instance="paperclip-identity-exporter:9187"}'
+        values: "0+0x30"
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PaperclipIdentityExporterDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PaperclipIdentityExporterDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: paperclip
+              component: monitoring
+              job: paperclip-identity
+              instance: paperclip-identity-exporter:9187
+            exp_annotations:
+              summary: "Paperclip identity exporter is not scrapeable"
+              description: "Prometheus cannot scrape paperclip-identity-exporter:9187, so credential-broker outages are currently undetectable. Usually the exporter cannot reach postgres-db or the paperclip_metrics_ro password is stale."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipidentityexporterdown"
+
+  # ---------------------------------------------------------------------------
+  # 5. Absence of signal. Total silence must not read as "broker healthy".
+  # ---------------------------------------------------------------------------
+  - name: stale control plane is reported instead of passing as healthy
+    interval: 1m
+    input_series:
+      - series: 'paperclip_identity_context_freshness_seconds{job="paperclip-identity",instance="paperclip-identity-exporter:9187"}'
+        values: "1800+60x150"
+
+    alert_rule_test:
+      # 1800s + 60*30 = 3600s at 30m — still inside the 2h budget.
+      - eval_time: 30m
+        alertname: PaperclipIdentityContextsStale
+        exp_alerts: []
+      # Crosses 7200s at t=90m; `for: 15m` puts the first firing at t=105m.
+      - eval_time: 100m
+        alertname: PaperclipIdentityContextsStale
+        exp_alerts: []
+      - eval_time: 110m
+        alertname: PaperclipIdentityContextsStale
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              service: paperclip
+              component: control-plane
+              job: paperclip-identity
+              instance: paperclip-identity-exporter:9187
+            exp_annotations:
+              summary: "No Paperclip identity context recorded for over 2h"
+              description: "Newest run_identity_contexts row is 2h 20m 0s old. Unattended heartbeats should produce one every 30 minutes, so either the control plane is stopped or every agent is paused. While this is firing the broker-outage alerts above are silent for lack of data, not for lack of a problem."
+              runbook_url: "https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipidentitycontextsstale"

@@ -1,0 +1,171 @@
+# =============================================================================
+# Paperclip credential-broker identity alerting (RILAAA-81).
+#
+# Background: RILAAA-75 was a three-day silent outage in which the GitHub
+# credential broker handed out no identity for unattended (`company_default`)
+# runs while user-attributed runs stayed healthy. Every engineer heartbeat
+# degraded to "cannot commit" and nothing alerted; it surfaced only when an
+# engineer hit `fatal: empty ident name` and escalated by hand.
+#
+# The thresholds below are deliberately tight. The correct steady state after
+# RILAAA-75 is ZERO unavailable unattended identities, so "any at all" is a
+# warning rather than something to be averaged away.
+#
+# Validate changes with: ./scripts/test-rules.sh  (promtool test rules)
+# =============================================================================
+
+groups:
+  # ---------------------------------------------------------------------------
+  # Recording rules. These exist so the Grafana panel and any ad-hoc query share
+  # one definition of "availability", and so a cause with zero successes still
+  # plots as 0% instead of dropping off the graph — the missing line is exactly
+  # what made RILAAA-75 invisible.
+  #
+  # Deliberately built on the cumulative counter over 1h rather than on the
+  # 15-minute window gauge. At a ~30-minute heartbeat cadence the 15-minute
+  # window is empty about half the time, and an empty window makes the ratio
+  # 0/0 = NaN — which Grafana draws as a hole in the chart, i.e. the exact
+  # failure this dashboard exists to prevent. A 1-hour counter lookback always
+  # spans at least one heartbeat cycle, so the lines stay continuous.
+  #
+  # The alerting rules below still use the tight 15-minute window: fast
+  # detection wants a short window, a readable dashboard wants a stable one.
+  # ---------------------------------------------------------------------------
+  - name: paperclip-identity-recording
+    interval: 30s
+    rules:
+      - record: paperclip:identity_contexts:1h
+        expr: |
+          sum by (credential, cause) (
+            increase(paperclip_identity_context_cumulative_total[1h])
+          )
+
+      # `or ... * 0` supplies an explicit zero for any cause that has traffic but
+      # no `available` series at all. Without it the division returns no series
+      # for a fully-failing cause and the panel goes blank at precisely the
+      # moment it matters. company_default is in exactly that state today.
+      - record: paperclip:identity_available:1h
+        expr: |
+          sum by (credential, cause) (
+            increase(paperclip_identity_context_cumulative_total{status="available"}[1h])
+          )
+            or
+          (paperclip:identity_contexts:1h * 0)
+
+      # `> 0` on the denominator drops causes with no attempts in the last hour.
+      # Availability is undefined for a cause nothing invoked, and plotting it as
+      # 0% would be a false alarm. An active cause always has a denominator, so
+      # the dangerous case — real traffic, zero successes — still shows as 0%.
+      - record: paperclip:identity_availability_ratio:1h
+        expr: |
+          paperclip:identity_available:1h / (paperclip:identity_contexts:1h > 0)
+
+  # ---------------------------------------------------------------------------
+  # Alerting rules.
+  # ---------------------------------------------------------------------------
+  - name: paperclip-identity-alerts
+    interval: 30s
+    rules:
+      # Warning: any unattended run in the trailing 15 minutes got no identity.
+      # `for: 0m` is intentional — the exporter's query window already provides
+      # 15 minutes of smoothing, so adding a `for` here would only delay the
+      # page without filtering anything.
+      - alert: PaperclipUnattendedIdentityUnavailable
+        expr: |
+          paperclip_identity_context_window_count{cause="company_default", status="unavailable"} > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: paperclip
+          component: credential-broker
+        annotations:
+          summary: >-
+            Paperclip {{ $labels.credential }} broker returned no identity for
+            {{ $value }} unattended run(s) in the last 15m
+          description: >-
+            cause=company_default status=unavailable credential={{ $labels.credential }}.
+            Unattended engineer heartbeats cannot commit or push right now, and they
+            will degrade silently (`fatal: empty ident name`) rather than fail loudly.
+            Expected steady state is zero. This is the RILAAA-75 failure mode.
+          runbook_url: https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipunattendedidentityunavailable
+
+      # Page: an entire heartbeat cycle has produced denials and no successes.
+      #
+      # This deliberately does NOT reuse the windowed gauge with `for: 30m`.
+      # Unattended heartbeats fire every ~30 minutes, so the 15-minute window is
+      # empty roughly half the time even mid-outage; a `for: 30m` on a gauge that
+      # keeps dropping to 0 resets before it ever matures, and the page would
+      # never have fired for RILAAA-75. The cumulative counter has no gaps, so a
+      # 35-minute lookback is guaranteed to span at least one full cycle.
+      #
+      # `unless` makes this "denials and nothing but denials for this cause" —
+      # a cause that is partially working is a different, lesser problem and is
+      # already covered by the warning above.
+      - alert: PaperclipUnattendedIdentityUnavailableSustained
+        expr: |
+          (
+            sum by (credential, cause) (
+              increase(paperclip_identity_context_cumulative_total{cause="company_default", status="unavailable"}[35m])
+            ) > 0
+          )
+          unless
+          (
+            sum by (credential, cause) (
+              increase(paperclip_identity_context_cumulative_total{cause="company_default", status="available"}[35m])
+            ) > 0
+          )
+        for: 0m
+        labels:
+          severity: critical
+          service: paperclip
+          component: credential-broker
+        annotations:
+          summary: >-
+            Paperclip {{ $labels.credential }} broker has denied every unattended
+            identity for a full heartbeat cycle
+          description: >-
+            Sustained credential-broker outage for cause=company_default: denials and
+            zero successes across the last 35 minutes, which spans at least one
+            complete unattended heartbeat cycle. Every unattended engineer is unable
+            to commit. Check the GitHub user-grant agent delegation first — that was
+            the root cause in RILAAA-75.
+          runbook_url: https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipunattendedidentityunavailable
+
+      # Meta-alert: if the exporter is down we are blind to the two alerts above.
+      # 10m tolerates a stack restart without paging.
+      - alert: PaperclipIdentityExporterDown
+        expr: up{job="paperclip-identity"} == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: paperclip
+          component: monitoring
+        annotations:
+          summary: Paperclip identity exporter is not scrapeable
+          description: >-
+            Prometheus cannot scrape paperclip-identity-exporter:9187, so
+            credential-broker outages are currently undetectable. Usually the
+            exporter cannot reach postgres-db or the paperclip_metrics_ro
+            password is stale.
+          runbook_url: https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipidentityexporterdown
+
+      # Absence-of-signal: the windowed gauge cannot distinguish "broker healthy"
+      # from "no runs at all", because both produce no `unavailable` series.
+      # Unattended heartbeats run every 30 minutes, so two hours of total silence
+      # means the control plane itself is stopped or every agent is paused.
+      - alert: PaperclipIdentityContextsStale
+        expr: paperclip_identity_context_freshness_seconds > 7200
+        for: 15m
+        labels:
+          severity: info
+          service: paperclip
+          component: control-plane
+        annotations:
+          summary: No Paperclip identity context recorded for over 2h
+          description: >-
+            Newest run_identity_contexts row is {{ $value | humanizeDuration }} old.
+            Unattended heartbeats should produce one every 30 minutes, so either the
+            control plane is stopped or every agent is paused. While this is firing
+            the broker-outage alerts above are silent for lack of data, not for
+            lack of a problem.
+          runbook_url: https://github.com/Rilan-Dev/Data-Infrastructure-Stack/blob/main/monitoring/README.md#paperclipidentitycontextsstale
