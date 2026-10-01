@@ -1,0 +1,18 @@
+# Grafana datasource provisioning. No credentials here: Prometheus is reachable
+# only on the internal `monitoring` network and runs without auth, so there is
+# nothing to leak into git.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: platform-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Must match prometheus.yml's scrape_interval so range panels pick a
+      # sensible default step instead of over-sampling.
+      timeInterval: 30s
+      httpMethod: POST
