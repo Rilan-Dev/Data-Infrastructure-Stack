@@ -1,0 +1,21 @@
+# Cloudflare hostname baseline
+# captured: 2026-10-02T16:06:18Z
+nexahub.ostechnologies.in	200
+auth.ostechnologies.in	200
+platform.ostechnologies.in	200
+pro-rilan.ostechnologies.in	200
+default.ostechnologies.in	200
+api-nexahub.ostechnologies.in	200
+jenkins.ostechnologies.in	403
+n8n.ostechnologies.in	200
+dynamic-ui.ostechnologies.in	200
+talentbridge.ostechnologies.in	200
+dur.ostechnologies.in	200
+obsidian.ostechnologies.in	502
+api-obsidian.ostechnologies.in	404
+api-dynoshopcy.ostechnologies.in	404
+api-equitenant.ostechnologies.in	502
+camofox-api.ostechnologies.in	502
+camofox-vnc.ostechnologies.in	502
+camofox-cp.ostechnologies.in	502
+openclaw.ostechnologies.in	502
